@@ -1,0 +1,9 @@
+name: terabox-watch-bot
+type: web
+env:
+  BOT_TOKEN: "YOUR_BOT_TOKEN"
+build:
+  commands:
+    - pip install -r requirements.txt
+run:
+  command: python main.py
