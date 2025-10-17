@@ -15,46 +15,64 @@ logger = logging.getLogger('TeraboxBot')
 
 
 # --- ২. কনফিগারেশন লোড করা ---
-# এই মানগুলো রেন্ডার এনভায়রনমেন্ট ভেরিয়েবল থেকে লোড হওয়া আবশ্যক।
-
+# এই মানগুলো Render Environment Variables থেকে লোড হওয়া আবশ্যক।
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("SESSION_STRING")
 PORT = int(os.environ.get("PORT", 8080))
+
+# Terabox API Endpoint
 TERABOX_API_URL = "https://terabox-api.vercel.app/api?url="
 
+# ক্লায়েন্টের ফাইল সেশন নেম (ফাইল নামের দৈর্ঘ্য সীমিত রাখতে ছোট নাম)
+CLIENT_NAME = "terabox_bot_session" 
 
-# --- ৩. কনফিগারেশন বৈধতা যাচাই (Mandatory Check) ---
+
+# --- ৩. কনফিগারেশন বৈধতা যাচাই ---
 
 if not BOT_TOKEN or not API_ID or not API_HASH:
     logger.critical("FATAL: BOT_TOKEN, API_ID, and API_HASH must be set in Environment Variables.")
     sys.exit(1)
 
-# সেশন স্ট্রিং ব্যবহার বাধ্যতামূলক করা হলো, যা Render এর জন্য সেরা
-if not SESSION_STRING:
-    logger.warning("WARNING: SESSION_STRING not found. Bot might face issues with re-authorization on restart.")
-    logger.warning("Please run a session generator script locally and set SESSION_STRING in Render.")
-    CLIENT_NAME = "terabox_bot_session"
-else:
-    # সেশন স্ট্রিং থাকলে এটি ক্লায়েন্টের নাম হিসেবে কাজ করবে
-    CLIENT_NAME = SESSION_STRING
-
-# --- ৪. ক্লায়েন্ট ইনিশিয়ালাইজেশন ---
+# API ID কে integer এ কনভার্ট করা
 try:
-    bot = Client(
-        CLIENT_NAME, 
-        api_id=int(API_ID),
-        api_hash=API_HASH,
-        bot_token=BOT_TOKEN
-    )
-    logger.info("Pyrogram Client initialized.")
-except Exception as e:
-    logger.critical(f"Initialization Failed: {e}")
+    API_ID_INT = int(API_ID)
+except ValueError:
+    logger.critical("FATAL: API_ID must be a valid integer.")
     sys.exit(1)
+
+
+# --- ৪. ক্লায়েন্ট ইনিশিয়ালাইজেশন (Fix for "File name too long") ---
 
 # Flask সেটআপ
 app = Flask(__name__)
+
+try:
+    if SESSION_STRING:
+        # চূড়ান্ত ফিক্স: সেশন স্ট্রিং থাকলে সেটি সরাসরি প্যারামিটার হিসেবে পাস করা
+        bot = Client(
+            CLIENT_NAME, # ক্লায়েন্ট নাম ছোট রাখা হলো
+            api_id=API_ID_INT,
+            api_hash=API_HASH,
+            bot_token=BOT_TOKEN,
+            session_string=SESSION_STRING # <--- সেশন স্ট্রিং সরাসরি এখানে ব্যবহার করা হচ্ছে
+        )
+        logger.info("Client initialized successfully using SESSION_STRING (Recommended method).")
+    else:
+        # সেশন স্ট্রিং না থাকলে, Pyrogram কে নিজে ফাইল তৈরি করার সুযোগ দেওয়া হলো
+        # তবে Render এ এটি ব্যর্থ হতে পারে।
+        bot = Client(
+            CLIENT_NAME, 
+            api_id=API_ID_INT,
+            api_hash=API_HASH,
+            bot_token=BOT_TOKEN
+        )
+        logger.warning("Client initialized. No SESSION_STRING found, attempting file creation (Risk of file system error).")
+
+except Exception as e:
+    logger.critical(f"Client initialization failed: {e}")
+    sys.exit(1)
 
 
 # --- ৫. ফ্লাস্ক রুট (Health Check) ---
@@ -64,13 +82,12 @@ def home():
     return "✅ Terabox Watch Bot is Running Successfully!"
 
 
-# --- ৬. API লজিক ফাংশন (Synchronous API Call) ---
+# --- ৬. API লজিক ফাংশন ---
 
 async def get_terabox_link(link: str):
     """Terabox API কল করে সরাসরি ডাউনলোড লিংক বের করে।"""
     api_url = f"{TERABOX_API_URL}{link}"
     
-    # requests synchronously ব্যবহার করা হয়, কিন্তু Pyrogram async context এ এটি ঠিক আছে
     try:
         res = requests.get(api_url, timeout=15).json()
 
@@ -114,6 +131,7 @@ async def get_video_handler(_, msg):
     waiting_msg = await msg.reply_text("⏳ আপনার লিংক প্রসেস করা হচ্ছে... দয়া করে অপেক্ষা করুন।")
     
     video_url = await get_terabox_link(link)
+    reply_markup = None
     
     # এরর হ্যান্ডলিং এবং রিপ্লাই
     if video_url == "NETWORK_ERROR":
@@ -131,7 +149,7 @@ async def get_video_handler(_, msg):
         text = "⚠️ ভিডিও বের করা যায়নি। সার্ভারের সমস্যা হতে পারে বা লিংকটি অবৈধ/ডিলিট করা হয়েছে।"
     
     # মেসেজ এডিট করা
-    await waiting_msg.edit_text(text, reply_markup=reply_markup if 'reply_markup' in locals() else None)
+    await waiting_msg.edit_text(text, reply_markup=reply_markup)
 
 
 # --- ৮. মাল্টিথ্রেডিং এবং স্টার্টআপ লজিক ---
