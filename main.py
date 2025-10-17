@@ -3,7 +3,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from flask import Flask
 import threading, requests
 
-BOT_TOKEN = "YOUR_BOT_TOKEN"  # ← এখানে তোমার বট টোকেন বসাও
+BOT_TOKEN = "7991711310:AAHIZbDdINXt9haVibV-sBLsq2N4S-hyxDQ"  # ← এখানে তোমার বট টোকেন বসাও
 
 app = Flask(__name__)
 bot = Client("terabox-bot", bot_token=BOT_TOKEN)
