@@ -15,43 +15,34 @@ logger = logging.getLogger('TeraboxBot')
 
 
 # --- ২. কনফিগারেশন লোড করা ---
-# এই মানগুলো Render Environment Variables থেকে লোড হওয়া আবশ্যক।
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("SESSION_STRING")
-LOG_CHANNEL_ID = os.environ.get("LOG_CHANNEL_ID") # নতুন সংযোজন
+LOG_CHANNEL_ID = os.environ.get("LOG_CHANNEL_ID") # Chat ID স্ট্রিং হিসেবে লোড হবে
 PORT = int(os.environ.get("PORT", 8080))
 
-# Terabox API Endpoint
 TERABOX_API_URL = "https://terabox-api.vercel.app/api?url="
-
-# ক্লায়েন্টের ফাইল সেশন নেম (ফাইল নামের দৈর্ঘ্য সীমিত রাখতে ছোট নাম)
 CLIENT_NAME = "terabox_bot_session" 
 
 
 # --- ৩. কনফিগারেশন বৈধতা যাচাই ---
-
 if not all([BOT_TOKEN, API_ID, API_HASH]):
-    logger.critical("FATAL: BOT_TOKEN, API_ID, and API_HASH must be set in Environment Variables.")
+    logger.critical("FATAL: BOT_TOKEN, API_ID, and API_HASH must be set.")
     sys.exit(1)
 
 try:
     API_ID_INT = int(API_ID)
-    if LOG_CHANNEL_ID:
-        LOG_CHANNEL_ID_INT = int(LOG_CHANNEL_ID)
 except ValueError:
-    logger.critical("FATAL: API_ID or LOG_CHANNEL_ID must be valid integers.")
+    logger.critical("FATAL: API_ID must be a valid integer.")
     sys.exit(1)
 
 
 # --- ৪. ক্লায়েন্ট ইনিশিয়ালাইজেশন ---
-
 app = Flask(__name__)
 
 try:
     if SESSION_STRING:
-        # চূড়ান্ত ফিক্স: সেশন স্ট্রিং থাকলে সেটি সরাসরি প্যারামিটার হিসেবে পাস করা
         bot = Client(
             CLIENT_NAME, 
             api_id=API_ID_INT,
@@ -59,41 +50,40 @@ try:
             bot_token=BOT_TOKEN,
             session_string=SESSION_STRING
         )
-        logger.info("Client initialized successfully using SESSION_STRING.")
     else:
-        # সেশন স্ট্রিং না থাকলে, Pyrogram কে নিজে ফাইল তৈরি করার সুযোগ দেওয়া
         bot = Client(
             CLIENT_NAME, 
             api_id=API_ID_INT,
             api_hash=API_HASH,
             bot_token=BOT_TOKEN
         )
-        logger.warning("Client initialized. No SESSION_STRING found, attempting file creation.")
+    logger.info("Pyrogram Client initialized.")
 
 except Exception as e:
     logger.critical(f"Client initialization failed: {e}")
     sys.exit(1)
 
 
-# --- ৫. লগ চ্যানেল ফাংশন ---
+# --- ৫. লগ চ্যানেল ফাংশন (ID ফিক্স) ---
 
 async def log_to_channel(text: str, level: str = 'INFO'):
     """গুরুত্বপূর্ণ মেসেজ লগ চ্যানেলে পাঠায়"""
     if LOG_CHANNEL_ID:
         try:
+            # ID সরাসরি স্ট্রিং হিসেবে পাস করা হচ্ছে Peer ID Invalid এড়াতে
             await bot.send_message(
-                LOG_CHANNEL_ID_INT,
+                LOG_CHANNEL_ID, # এখানে স্ট্রিং বা ইনটিজার যেকোনোটি কাজ করা উচিত
                 f"[{level}] {text}",
                 disable_notification=True
             )
         except Exception as e:
-            logger.error(f"Failed to send log to channel: {e}")
+            # যদি Peer ID Invalid এরর আসে, তা এখানে ধরা পড়বে
+            logger.error(f"Failed to send log to channel ({LOG_CHANNEL_ID}): {e}")
 
 
 # --- ৬. ফ্লাস্ক রুট ---
 @app.route('/')
 def home():
-    """হোস্টিং প্ল্যাটফর্মের জন্য সার্ভার স্ট্যাটাস চেক"""
     return "✅ Terabox Watch Bot is Running Successfully!"
 
 
@@ -105,12 +95,10 @@ async def get_terabox_link(link: str):
     
     try:
         res = requests.get(api_url, timeout=15).json()
-
         if res.get("success") and res.get("downloadLink"):
             return res["downloadLink"]
         else:
             return None
-            
     except requests.exceptions.RequestException:
         return "NETWORK_ERROR"
     except Exception as e:
@@ -122,18 +110,14 @@ async def get_terabox_link(link: str):
 
 @bot.on_message(filters.command("start"))
 async def start_handler(_, msg):
-    """/start কমান্ডের উত্তর দেয়"""
     user_info = f"User: {msg.from_user.id} ({msg.from_user.first_name})"
-    logger.info(f"Received /start from {user_info}")
     
-    await log_to_channel(f"Received /start command.\n{user_info}", level='EVENT')
+    await log_to_channel(f"Received /start from {user_info}", level='EVENT')
     
     await msg.reply_text(
         "👋 **স্বাগতম! আমি Terabox Watch Bot!**\n\n"
         "আমাকে শুধু একটা **বৈধ Terabox লিংক** পাঠান।\n"
-        "আমি সাথে সাথে আপনাকে সরাসরি ভিডিও দেখার লিংক তৈরি করে দেব 🔥\n\n"
-        "এখনই চেষ্টা করুন!",
-        disable_web_page_preview=True
+        "আমি সাথে সাথে আপনাকে সরাসরি ভিডিও দেখার লিংক তৈরি করে দেব 🔥"
     )
 
 @bot.on_message(filters.text & ~filters.command("start"))
@@ -141,7 +125,7 @@ async def get_video_handler(_, msg):
     link = msg.text.strip()
     user_info = f"User: {msg.from_user.id} ({msg.from_user.first_name})"
     
-    await log_to_channel(f"Received link: `{link}`\n{user_info}", level='REQUEST')
+    await log_to_channel(f"Received link: `{link}` from {user_info}", level='REQUEST')
     
     if "terabox" not in link.lower():
         return await msg.reply_text("❌ দয়া করে একটি বৈধ Terabox লিংক দিন।")
@@ -151,26 +135,20 @@ async def get_video_handler(_, msg):
     video_url = await get_terabox_link(link)
     reply_markup = None
     
-    # এরর হ্যান্ডলিং
     if video_url == "NETWORK_ERROR":
         text = "⚠️ API এর সাথে যোগাযোগ করা যাচ্ছে না বা এটি সময়মত সাড়া দিচ্ছে না। কিছুক্ষণ পর আবার চেষ্টা করুন।"
-        await log_to_channel(f"Network Error during API call for {user_info}", level='ERROR')
     elif video_url == "UNKNOWN_ERROR":
         text = "❌ একটি অপ্রত্যাশিত ভুল হয়েছে। সার্ভার লগ চেক করুন।"
-        await log_to_channel(f"Unknown Error for {user_info}", level='ERROR')
     elif video_url:
-        # সফল হলে
         text = "✅ **সফল!** ভিডিও রেডি! এখনই দেখতে পারো 👇"
         reply_markup = InlineKeyboardMarkup(
             [[InlineKeyboardButton("▶️ Watch Now", url=video_url)]]
         )
         await log_to_channel(f"Successfully extracted URL for {user_info}.", level='SUCCESS')
     else:
-        # API লিংক দিতে ব্যর্থ হলে
         text = "⚠️ ভিডিও বের করা যায়নি। সার্ভারের সমস্যা হতে পারে বা লিংকটি অবৈধ/ডিলিট করা হয়েছে।"
         await log_to_channel(f"Extraction failed for {user_info}: {link}", level='WARNING')
     
-    # মেসেজ এডিট করা
     await waiting_msg.edit_text(text, reply_markup=reply_markup)
 
 
@@ -190,21 +168,19 @@ if __name__ == "__main__":
                 
                 # বট অনলাইনে আসার সাথে সাথেই লগ চ্যানেলে মেসেজ পাঠাও
                 if LOG_CHANNEL_ID:
-                    await bot.send_message(
-                        LOG_CHANNEL_ID_INT,
+                    await log_to_channel(
                         f"🟢 **BOT ONLINE!** Successfully connected and ready to process links.",
-                        disable_notification=False
+                        level='INFO'
                     )
                 
                 # বটকে অনির্দিষ্টকাল ধরে চালু রাখা
                 await asyncio.Future() 
                 
             except Exception as e:
-                logger.error(f"❌ [FATAL THREAD ERROR] Pyrogram failure: {e}")
+                logger.error(f"❌ [PYROGRAM THREAD ERROR] Failure: {e}")
             finally:
-                if bot.is_connected:
-                    await bot.stop()
-                    logger.info("🛑 [STATUS] Pyrogram bot stopped.")
+                # bot.stop() কে অপসারণ করা হয়েছে যাতে RuntimeError না আসে।
+                logger.info("🛑 [STATUS] Pyrogram thread terminated.")
                 
         loop.run_until_complete(run_pyrogram())
         
